@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import '../models/chat_model.dart';
 import '../services/api_service.dart';
 
 /// Sohbet Repository
@@ -6,11 +7,12 @@ import '../services/api_service.dart';
 /// Sohbet sistemiyle ilgili tüm veri işlemlerini yönetir.
 /// API servisi üzerinden Supabase'e bağlanır.
 /// 
-/// Bu repository:
-/// - Sohbet mesajlarını yönetir
-/// - Sohbet ayarlarını kontrol eder
-/// - Kullanıcı kısıtlamalarını yönetir
-/// - Raporları işler
+/// Özellikler:
+/// - Mesaj gönderme/silme
+/// - Mesajları getirme (pagination)
+/// - Sohbet ayarlarını yönetme (yönetici)
+/// - Kullanıcı kısıtlamaları (susturma/engelleme)
+/// - İtiraz yönetimi
 
 class ChatRepository {
   final ApiService _apiService = ApiService();
@@ -18,18 +20,18 @@ class ChatRepository {
   static const String _settingsEndpoint = '/chat-settings';
   static const String _restrictionsEndpoint = '/chat-user-restrictions';
 
-  /// Sohbet mesajlarını getir
+  /// Sohbet mesajlarını getir (pagination ile)
   /// 
-  /// [limit]: Kaç mesaj getirileceği
-  /// [offset]: Kaç mesaj atlanacağı (pagination için)
+  /// [limit]: Kaç mesaj getirileceği (default: 50)
+  /// [offset]: Kaç mesaj atlanacağı
   /// 
-  /// Returns: Mesaj listesi (en yeniden en eskiye)
+  /// Returns: Mesajlar listesi (eski mesajlar önce)
   /// 
   /// Örnek:
   /// ```dart
-  /// final messages = await chatRepository.getMessages(limit: 50);
+  /// final messages = await chatRepository.getMessages(limit: 100);
   /// ```
-  Future<List<Map<String, dynamic>>> getMessages({
+  Future<List<ChatMessage>> getMessages({
     int limit = 50,
     int offset = 0,
   }) async {
@@ -37,18 +39,59 @@ class ChatRepository {
       final response = await _apiService.get(
         _messagesEndpoint,
         queryParameters: {
-          'order': 'created_at.desc',
+          'is_deleted': false,
           'limit': limit,
           'offset': offset,
+          'order': 'created_at.asc',
         },
       );
 
       final data = response['data'] as List?;
       if (data == null) return [];
 
-      return List<Map<String, dynamic>>.from(data);
+      return data
+          .map((item) => ChatMessage.fromJson(item as Map<String, dynamic>))
+          .toList();
     } on DioException catch (e) {
       print('Sohbet mesajları getirme hatası: ${e.message}');
+      rethrow;
+    }
+  }
+
+  /// Son mesajlardan itibaren getir (en yeni mesajlar önce)
+  /// 
+  /// [limit]: Kaç mesaj getirileceği
+  /// 
+  /// Returns: En yeni mesajlardan başlayan liste
+  /// 
+  /// Örnek:
+  /// ```dart
+  /// final latestMessages = await chatRepository.getLatestMessages(limit: 30);
+  /// ```
+  Future<List<ChatMessage>> getLatestMessages({int limit = 30}) async {
+    try {
+      final response = await _apiService.get(
+        _messagesEndpoint,
+        queryParameters: {
+          'is_deleted': false,
+          'limit': limit,
+          'order': 'created_at.desc',
+        },
+      );
+
+      final data = response['data'] as List?;
+      if (data == null) return [];
+
+      final messages = data
+          .map((item) => ChatMessage.fromJson(item as Map<String, dynamic>))
+          .toList();
+      
+      // Ters sıra çünkü API'den desc aldık, UI'da asc olsun
+      messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      
+      return messages;
+    } on DioException catch (e) {
+      print('Son sohbet mesajları getirme hatası: ${e.message}');
       rethrow;
     }
   }
@@ -58,60 +101,64 @@ class ChatRepository {
   /// [userId]: Gönderen kullanıcı ID
   /// [message]: Mesaj metni
   /// 
-  /// Returns: Gönderilen mesaj
+  /// Returns: Gönderim başarı durumu
   /// 
   /// Örnek:
   /// ```dart
-  /// final sent = await chatRepository.sendMessage(
-  ///   userId: 'user-id',
-  ///   message: 'Merhaba!',
+  /// await chatRepository.sendMessage(
+  ///   userId: 'user-123',
+  ///   message: 'Merhaba herkese!',
   /// );
   /// ```
-  Future<Map<String, dynamic>> sendMessage({
+  Future<bool> sendMessage({
     required String userId,
     required String message,
   }) async {
     try {
-      final response = await _apiService.post(
+      await _apiService.post(
         _messagesEndpoint,
         data: {
           'user_id': userId,
           'message': message,
+          'is_deleted': false,
         },
       );
-
-      return response as Map<String, dynamic>;
+      return true;
     } on DioException catch (e) {
       print('Mesaj gönderme hatası: ${e.message}');
-      rethrow;
+      return false;
     }
   }
 
-  /// Mesajı sil (Yönetici işlemi)
+  /// Mesaj sil (Yönetici işlemi)
   /// 
   /// [messageId]: Silinecek mesaj ID
-  /// [adminId]: Admin ID
+  /// [deletedBy]: Silme işlemini yapan yönetici ID
   /// 
   /// Örnek:
   /// ```dart
-  /// await chatRepository.deleteMessage(messageId: 1, adminId: 'admin-id');
+  /// await chatRepository.deleteMessage(
+  ///   messageId: 1,
+  ///   deletedBy: 'admin-123',
+  /// );
   /// ```
-  Future<void> deleteMessage({
+  Future<bool> deleteMessage({
     required int messageId,
-    required String adminId,
+    required String deletedBy,
   }) async {
     try {
       await _apiService.patch(
         '$_messagesEndpoint?id=eq.$messageId',
         data: {
           'is_deleted': true,
-          'deleted_by': adminId,
+          'deleted_by': deletedBy,
           'deleted_at': DateTime.now().toIso8601String(),
         },
       );
+      return true;
     } on DioException catch (e) {
       print('Mesaj silme hatası: ${e.message}');
-      rethrow;
+      return false;
     }
   }
 
@@ -121,118 +168,88 @@ class ChatRepository {
   /// 
   /// Örnek:
   /// ```dart
-  /// final settings = await chatRepository.getChatSettings();
+  /// final settings = await chatRepository.getSettings();
   /// ```
-  Future<Map<String, dynamic>?> getChatSettings() async {
+  Future<ChatSettings?> getSettings() async {
     try {
       final response = await _apiService.get(_settingsEndpoint);
+
       final data = response['data'] as List?;
       if (data == null || data.isEmpty) return null;
 
-      return data[0] as Map<String, dynamic>;
+      return ChatSettings.fromJson(data[0] as Map<String, dynamic>);
     } on DioException catch (e) {
       print('Sohbet ayarları getirme hatası: ${e.message}');
-      return null;
-    }
-  }
-
-  /// Sohbeti aç/kapat (Yönetici işlemi)
-  /// 
-  /// [isOpen]: Sohbet açık mı?
-  /// 
-  /// Örnek:
-  /// ```dart
-  /// await chatRepository.toggleChat(isOpen: false);
-  /// ```
-  Future<void> toggleChat({required bool isOpen}) async {
-    try {
-      await _apiService.patch(
-        _settingsEndpoint,
-        data: {'is_open': isOpen},
-      );
-    } on DioException catch (e) {
-      print('Sohbet aç/kapat hatası: ${e.message}');
       rethrow;
     }
   }
 
-  /// Yavaş modu etkinleştir/devre dışı bırak (Yönetici işlemi)
+  /// Sohbet ayarlarını güncelle (Yönetici işlemi)
   /// 
-  /// [isSlowMode]: Yavaş mod aktif mi?
-  /// [interval]: Aralık (1m, 2m, 5m, 10m, 60m)
-  /// [exemptTiers]: Muaf kullanıcı seviyeleri
+  /// [updates]: Güncellenecek alanlar
+  /// - isOpen: Sohbet açık mı?
+  /// - isSlowMode: Yavaş mod aktif mi?
+  /// - slowModeInterval: Yavaş mod aralığı (1m, 2m, 5m, 10m, 60m)
   /// 
   /// Örnek:
   /// ```dart
-  /// await chatRepository.toggleSlowMode(
-  ///   isSlowMode: true,
-  ///   interval: '5m',
-  ///   exemptTiers: ['vip', 'admin'],
-  /// );
+  /// await chatRepository.updateSettings({
+  ///   'is_slow_mode': true,
+  ///   'slow_mode_interval': '1m',
+  /// });
   /// ```
-  Future<void> toggleSlowMode({
-    required bool isSlowMode,
-    String? interval,
-    List<String>? exemptTiers,
-  }) async {
+  Future<void> updateSettings(Map<String, dynamic> updates) async {
     try {
       await _apiService.patch(
         _settingsEndpoint,
-        data: {
-          'is_slow_mode': isSlowMode,
-          'slow_mode_interval': interval,
-          'exempt_user_tiers': exemptTiers,
-        },
+        data: updates,
       );
     } on DioException catch (e) {
-      print('Yavaş mod değişimi hatası: ${e.message}');
+      print('Sohbet ayarları güncelleme hatası: ${e.message}');
       rethrow;
     }
   }
 
-  /// Sohbeti temizle (Yönetici işlemi)
+  /// Sohbeti temizle (Yönetici işlemi - tüm mesajları sil)
   /// 
   /// Örnek:
   /// ```dart
   /// await chatRepository.clearChat();
   /// ```
-  Future<void> clearChat() async {
+  Future<bool> clearChat() async {
     try {
-      // Tüm mesajları sil
-      final messages = await getMessages(limit: 10000);
-      for (var message in messages) {
-        await deleteMessage(
-          messageId: message['id'],
-          adminId: 'system',
-        );
-      }
+      await _apiService.post(
+        '$_messagesEndpoint/clear',
+        data: {},
+      );
+      return true;
     } on DioException catch (e) {
       print('Sohbet temizleme hatası: ${e.message}');
-      rethrow;
+      return false;
     }
   }
 
-  /// Kullanıcıyı susttur (Yönetici işlemi)
+  /// Kullanıcıyı sohbette sustur (Yönetici işlemi)
   /// 
   /// [userId]: Susturulacak kullanıcı ID
-  /// [adminId]: İşlemi yapan admin ID
-  /// [expiresAt]: Susturma ne kadar sürecek (NULL = kalıcı)
-  /// [reason]: Sebep
+  /// [reason]: Sebep (opsiyonel)
+  /// [duration]: Süre (opsiyonel, null = kalıcı)
+  /// [restrictedBy]: Kısıtlamayı yapan yönetici ID
   /// 
   /// Örnek:
   /// ```dart
   /// await chatRepository.muteUser(
-  ///   userId: 'user-id',
-  ///   adminId: 'admin-id',
-  ///   expiresAt: DateTime.now().add(Duration(hours: 1)),
-  ///   reason: 'Spam',
+  ///   userId: 'user-123',
+  ///   reason: 'Spam mesaj',
+  ///   duration: Duration(hours: 1),
+  ///   restrictedBy: 'admin-123',
   /// );
   /// ```
-  Future<void> muteUser({
+  Future<bool> muteUser({
     required String userId,
-    required String adminId,
-    DateTime? expiresAt,
     String? reason,
+    Duration? duration,
+    required String restrictedBy,
   }) async {
     try {
       await _apiService.post(
@@ -240,38 +257,40 @@ class ChatRepository {
         data: {
           'user_id': userId,
           'restriction_type': 'muted',
-          'restricted_by': adminId,
-          'expires_at': expiresAt?.toIso8601String(),
           'reason': reason,
+          'expires_at': duration != null
+              ? DateTime.now().add(duration).toIso8601String()
+              : null,
+          'restricted_by': restrictedBy,
         },
       );
+      return true;
     } on DioException catch (e) {
       print('Kullanıcı susturma hatası: ${e.message}');
-      rethrow;
+      return false;
     }
   }
 
-  /// Kullanıcıyı engelle (Yönetici işlemi)
+  /// Kullanıcıyı sohbetten engelle (Yönetici işlemi)
   /// 
   /// [userId]: Engellenecek kullanıcı ID
-  /// [adminId]: İşlemi yapan admin ID
-  /// [expiresAt]: Engelleme ne kadar sürecek (NULL = kalıcı)
-  /// [reason]: Sebep
+  /// [reason]: Sebep (opsiyonel)
+  /// [duration]: Süre (opsiyonel, null = kalıcı)
+  /// [restrictedBy]: Engellemeyi yapan yönetici ID
   /// 
   /// Örnek:
   /// ```dart
   /// await chatRepository.blockUser(
-  ///   userId: 'user-id',
-  ///   adminId: 'admin-id',
-  ///   expiresAt: DateTime.now().add(Duration(days: 7)),
-  ///   reason: 'Küfür',
+  ///   userId: 'user-123',
+  ///   reason: 'Hakaret',
+  ///   restrictedBy: 'admin-123',
   /// );
   /// ```
-  Future<void> blockUser({
+  Future<bool> blockUser({
     required String userId,
-    required String adminId,
-    DateTime? expiresAt,
     String? reason,
+    Duration? duration,
+    required String restrictedBy,
   }) async {
     try {
       await _apiService.post(
@@ -279,18 +298,21 @@ class ChatRepository {
         data: {
           'user_id': userId,
           'restriction_type': 'blocked',
-          'restricted_by': adminId,
-          'expires_at': expiresAt?.toIso8601String(),
           'reason': reason,
+          'expires_at': duration != null
+              ? DateTime.now().add(duration).toIso8601String()
+              : null,
+          'restricted_by': restrictedBy,
         },
       );
+      return true;
     } on DioException catch (e) {
       print('Kullanıcı engelleme hatası: ${e.message}');
-      rethrow;
+      return false;
     }
   }
 
-  /// Kısıtlamayı kaldır (Yönetici işlemi)
+  /// Kullanıcının kısıtlamasını kaldır (Yönetici işlemi)
   /// 
   /// [restrictionId]: Kısıtlama ID
   /// 
@@ -298,18 +320,19 @@ class ChatRepository {
   /// ```dart
   /// await chatRepository.removeRestriction(restrictionId: 1);
   /// ```
-  Future<void> removeRestriction({required int restrictionId}) async {
+  Future<bool> removeRestriction({required int restrictionId}) async {
     try {
       await _apiService.delete(
         '$_restrictionsEndpoint?id=eq.$restrictionId',
       );
+      return true;
     } on DioException catch (e) {
       print('Kısıtlama kaldırma hatası: ${e.message}');
-      rethrow;
+      return false;
     }
   }
 
-  /// Kullanıcının kısıtlamalarını getir
+  /// Kullanıcı kısıtlamasını getir
   /// 
   /// [userId]: Kullanıcı ID
   /// 
@@ -317,31 +340,30 @@ class ChatRepository {
   /// 
   /// Örnek:
   /// ```dart
-  /// final restrictions = await chatRepository.getUserRestrictions('user-id');
+  /// final restrictions = await chatRepository.getUserRestrictions('user-123');
   /// ```
-  Future<List<Map<String, dynamic>>> getUserRestrictions(
-    String userId,
-  ) async {
+  Future<List<ChatUserRestriction>> getUserRestrictions(String userId) async {
     try {
       final response = await _apiService.get(
         _restrictionsEndpoint,
         queryParameters: {
           'user_id': 'eq.$userId',
-          'order': 'created_at.desc',
         },
       );
 
       final data = response['data'] as List?;
       if (data == null) return [];
 
-      return List<Map<String, dynamic>>.from(data);
+      return data
+          .map((item) => ChatUserRestriction.fromJson(item as Map<String, dynamic>))
+          .toList();
     } on DioException catch (e) {
-      print('Kullanıcı kısıtlamaları getirme hatası: ${e.message}');
-      return [];
+      print('Kullanıcı kısıtlaması getirme hatası: ${e.message}');
+      rethrow;
     }
   }
 
-  /// İtiraz gönder
+  /// İtiraz gönder (Engellenen kullanıcı)
   /// 
   /// [restrictionId]: Kısıtlama ID
   /// [appealMessage]: İtiraz mesajı
@@ -350,10 +372,10 @@ class ChatRepository {
   /// ```dart
   /// await chatRepository.submitAppeal(
   ///   restrictionId: 1,
-  ///   appealMessage: 'Yanlışlıkla yapıldı',
+  ///   appealMessage: 'Yanlışlıkla yapmış olabilirim, özür dilerim.',
   /// );
   /// ```
-  Future<void> submitAppeal({
+  Future<bool> submitAppeal({
     required int restrictionId,
     required String appealMessage,
   }) async {
@@ -365,9 +387,10 @@ class ChatRepository {
           'appeal_message': appealMessage,
         },
       );
+      return true;
     } on DioException catch (e) {
       print('İtiraz gönderme hatası: ${e.message}');
-      rethrow;
+      return false;
     }
   }
 }

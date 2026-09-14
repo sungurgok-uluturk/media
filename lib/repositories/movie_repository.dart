@@ -4,60 +4,55 @@ import '../services/api_service.dart';
 
 /// Film/Dizi Repository
 /// 
-/// Film ve dizileriyle ilgili tüm veri işlemlerini yönetir.
+/// Film ve dizilerle ilgili tüm veri işlemlerini yönetir.
 /// API servisi üzerinden Supabase'e bağlanır.
 /// 
-/// Bu repository film listeleme, detay getirme, yorum yönetimi vb.
-/// tüm film operasyonlarını içerir.
+/// Özellikler:
+/// - Film ve dizi listeleme (kategoriye göre)
+/// - Türlere göre filtreleme
+/// - Film detayları ve yorumları
+/// - Sezon ve bölüm yönetimi
+/// - Yorum sistemi
+/// - Puan sistemi
 
 class MovieRepository {
   final ApiService _apiService = ApiService();
   static const String _moviesEndpoint = '/movies';
   static const String _genresEndpoint = '/movie-genres';
   static const String _commentsEndpoint = '/movie-comments';
-  static const String _seasonsEndpoint = '/movie-seasons';
-  static const String _episodesEndpoint = '/movie-episodes';
 
-  /// Tüm filtreleri sıfırla ve filmleri getir
+  /// Filmler/Dizileri getir
   /// 
-  /// [contentType]: İçerik türü (cinema, series) - NULL ise tümü
-  /// [genreId]: Tür ID - NULL ise tümü
+  /// [contentType]: 'cinema' (Sinema) veya 'series' (Dizi)
   /// [limit]: Kaç film getirileceği (default: 10)
   /// [offset]: Kaç film atlanacağı (pagination için)
-  /// [sortBy]: Sıralama kriteri (created_at, average_rating)
+  /// [sortBy]: Sıralama (created_at, average_rating, title)
   /// 
-  /// Returns: Film listesi
+  /// Returns: Film/dizi listesi
   /// 
   /// Örnek:
   /// ```dart
-  /// final movies = await movieRepository.getAllMovies(
+  /// final movies = await movieRepository.getMovies(
   ///   contentType: 'cinema',
-  ///   limit: 20,
+  ///   limit: 20
   /// );
   /// ```
-  Future<List<Movie>> getAllMovies({
-    String? contentType,
-    int? genreId,
+  Future<List<Movie>> getMovies({
+    required String contentType,
     int limit = 10,
     int offset = 0,
     String sortBy = 'created_at',
   }) async {
     try {
-      final queryParams = {
-        'is_active': true,
-        'limit': limit,
-        'offset': offset,
-        'order': '$sortBy.desc',
-      };
-
-      // İçerik türü filtresi ekle
-      if (contentType != null) {
-        queryParams['content_type'] = 'eq.$contentType';
-      }
-
       final response = await _apiService.get(
         _moviesEndpoint,
-        queryParameters: queryParams,
+        queryParameters: {
+          'content_type': 'eq.$contentType',
+          'is_active': true,
+          'limit': limit,
+          'offset': offset,
+          'order': '$sortBy.desc',
+        },
       );
 
       final data = response['data'] as List?;
@@ -67,16 +62,16 @@ class MovieRepository {
           .map((item) => Movie.fromJson(item as Map<String, dynamic>))
           .toList();
     } on DioException catch (e) {
-      print('Film listesi getirme hatası: ${e.message}');
+      print('Film/Dizi getirme hatası: ${e.message}');
       rethrow;
     }
   }
 
-  /// Belirli bir filmi ID'ye göre getir
+  /// Belirli bir filmi/diziyi ID'ye göre getir
   /// 
-  /// [movieId]: Film ID
+  /// [movieId]: Film/Dizi ID
   /// 
-  /// Returns: Film detayları
+  /// Returns: Film/Dizi
   /// 
   /// Örnek:
   /// ```dart
@@ -93,39 +88,46 @@ class MovieRepository {
 
       return Movie.fromJson(data[0] as Map<String, dynamic>);
     } on DioException catch (e) {
-      print('Film detay getirme hatası: ${e.message}');
+      print('Film/Dizi getirme hatası (ID: $movieId): ${e.message}');
       rethrow;
     }
   }
 
-  /// Tür ID'ye göre filmleri getir
+  /// Film/Dizi türlerine göre getir
   /// 
-  /// [genreId]: Tür ID
-  /// [contentType]: İçerik türü (cinema, series) - opsiyonel
+  /// [contentType]: 'cinema' veya 'series'
+  /// [genreIds]: Tür ID'leri
+  /// [limit]: Limit
+  /// [offset]: Offset
   /// 
-  /// Returns: Tüne ait film listesi
+  /// Returns: Filtrelenmiş film/dizi listesi
   /// 
   /// Örnek:
   /// ```dart
-  /// final scifiMovies = await movieRepository.getMoviesByGenre(2); // Bilim Kurgu
+  /// final movies = await movieRepository.getMoviesByGenres(
+  ///   contentType: 'cinema',
+  ///   genreIds: [1, 2], // Fantastik, Bilim Kurgu
+  /// );
   /// ```
-  Future<List<Movie>> getMoviesByGenre(
-    int genreId, {
-    String? contentType,
+  Future<List<Movie>> getMoviesByGenres({
+    required String contentType,
+    required List<int> genreIds,
+    int limit = 10,
+    int offset = 0,
   }) async {
     try {
-      final queryParams = {
-        'genre_ids': 'cs.{$genreId}', // Supabase array query
-        'is_active': true,
-      };
-
-      if (contentType != null) {
-        queryParams['content_type'] = 'eq.$contentType';
-      }
+      // Genre ID'leri komma ile ayırarak query oluştur
+      final genreQuery = genreIds.join(',');
 
       final response = await _apiService.get(
         _moviesEndpoint,
-        queryParameters: queryParams,
+        queryParameters: {
+          'content_type': 'eq.$contentType',
+          'genre_ids': 'cs.{$genreQuery}', // contains any
+          'is_active': true,
+          'limit': limit,
+          'offset': offset,
+        },
       );
 
       final data = response['data'] as List?;
@@ -135,15 +137,15 @@ class MovieRepository {
           .map((item) => Movie.fromJson(item as Map<String, dynamic>))
           .toList();
     } on DioException catch (e) {
-      print('Türe göre film getirme hatası: ${e.message}');
+      print('Türlerine göre film/dizi getirme hatası: ${e.message}');
       rethrow;
     }
   }
 
-  /// Film arama
+  /// Film/Dizi ara
   /// 
-  /// [query]: Aranacak kelime (başlık veya açıklamada)
-  /// [contentType]: İçerik türü filtresi (opsiyonel)
+  /// [query]: Aranacak kelime (başlıkta)
+  /// [limit]: Maksimum sonuç sayısı
   /// 
   /// Returns: Arama sonuçları
   /// 
@@ -153,22 +155,16 @@ class MovieRepository {
   /// ```
   Future<List<Movie>> searchMovies(
     String query, {
-    String? contentType,
+    int limit = 20,
   }) async {
     try {
-      final queryParams = {
-        'or': '(title.ilike.%$query%,description.ilike.%$query%)',
-        'is_active': true,
-        'limit': 50,
-      };
-
-      if (contentType != null) {
-        queryParams['content_type'] = 'eq.$contentType';
-      }
-
       final response = await _apiService.get(
         _moviesEndpoint,
-        queryParameters: queryParams,
+        queryParameters: {
+          'title': 'ilike.*$query*',
+          'is_active': true,
+          'limit': limit,
+        },
       );
 
       final data = response['data'] as List?;
@@ -178,36 +174,38 @@ class MovieRepository {
           .map((item) => Movie.fromJson(item as Map<String, dynamic>))
           .toList();
     } on DioException catch (e) {
-      print('Film arama hatası: ${e.message}');
+      print('Film/Dizi arama hatası: ${e.message}');
       rethrow;
     }
   }
 
-  /// Tüm türleri getir
+  /// Tüm film türlerini getir
   /// 
-  /// Returns: Tür listesi
+  /// Returns: Kullanılabilir film türleri
   /// 
   /// Örnek:
   /// ```dart
-  /// final genres = await movieRepository.getAllGenres();
+  /// final genres = await movieRepository.getGenres();
   /// ```
-  Future<List<Map<String, dynamic>>> getAllGenres() async {
+  Future<List<Map<String, dynamic>>> getGenres() async {
     try {
       final response = await _apiService.get(_genresEndpoint);
+
       final data = response['data'] as List?;
       if (data == null) return [];
-      return List<Map<String, dynamic>>.from(data);
+
+      return data.cast<Map<String, dynamic>>();
     } on DioException catch (e) {
-      print('Türler getirme hatası: ${e.message}');
-      return [];
+      print('Film türleri getirme hatası: ${e.message}');
+      rethrow;
     }
   }
 
   /// Dizi sezonlarını getir
   /// 
-  /// [movieId]: Dizi (film) ID
+  /// [movieId]: Dizi ID
   /// 
-  /// Returns: Sezon listesi
+  /// Returns: Sezonlar listesi
   /// 
   /// Örnek:
   /// ```dart
@@ -216,8 +214,7 @@ class MovieRepository {
   Future<List<MovieSeason>> getSeasons(int movieId) async {
     try {
       final response = await _apiService.get(
-        '$_seasonsEndpoint?movie_id=eq.$movieId',
-        queryParameters: {'order': 'season_number.asc'},
+        '$_moviesEndpoint/$movieId/seasons',
       );
 
       final data = response['data'] as List?;
@@ -227,16 +224,16 @@ class MovieRepository {
           .map((item) => MovieSeason.fromJson(item as Map<String, dynamic>))
           .toList();
     } on DioException catch (e) {
-      print('Sezonlar getirme hatası: ${e.message}');
+      print('Dizi sezonları getirme hatası: ${e.message}');
       rethrow;
     }
   }
 
-  /// Sezon bölümlerini getir
+  /// Sezonun bölümlerini getir
   /// 
   /// [seasonId]: Sezon ID
   /// 
-  /// Returns: Bölüm listesi
+  /// Returns: Bölümler listesi
   /// 
   /// Örnek:
   /// ```dart
@@ -245,8 +242,7 @@ class MovieRepository {
   Future<List<MovieEpisode>> getEpisodes(int seasonId) async {
     try {
       final response = await _apiService.get(
-        '$_episodesEndpoint?season_id=eq.$seasonId',
-        queryParameters: {'order': 'episode_number.asc'},
+        '/movie-seasons/$seasonId/episodes',
       );
 
       final data = response['data'] as List?;
@@ -256,16 +252,16 @@ class MovieRepository {
           .map((item) => MovieEpisode.fromJson(item as Map<String, dynamic>))
           .toList();
     } on DioException catch (e) {
-      print('Bölümler getirme hatası: ${e.message}');
+      print('Dizi bölümleri getirme hatası: ${e.message}');
       rethrow;
     }
   }
 
-  /// Film yorumlarını getir
+  /// Film/Dizi yorumlarını getir
   /// 
-  /// [movieId]: Film ID
+  /// [movieId]: Film/Dizi ID
   /// [limit]: Kaç yorum getirileceği
-  /// [offset]: Kaç yorum atlanacağı
+  /// [offset]: Pagination offset
   /// 
   /// Returns: Yorum listesi
   /// 
@@ -282,7 +278,7 @@ class MovieRepository {
       final response = await _apiService.get(
         '$_commentsEndpoint?movie_id=eq.$movieId',
         queryParameters: {
-          'is_deleted': 'eq.false',
+          'is_deleted': false,
           'limit': limit,
           'offset': offset,
           'order': 'created_at.desc',
@@ -292,39 +288,39 @@ class MovieRepository {
       final data = response['data'] as List?;
       if (data == null) return [];
 
-      return List<Map<String, dynamic>>.from(data);
+      return data.cast<Map<String, dynamic>>();
     } on DioException catch (e) {
-      print('Yorumlar getirme hatası: ${e.message}');
+      print('Film/Dizi yorum getirme hatası: ${e.message}');
       rethrow;
     }
   }
 
-  /// Yorum ekle
+  /// Film/Dizi'ye yorum yap
   /// 
-  /// [movieId]: Film ID
+  /// [movieId]: Film/Dizi ID
   /// [userId]: Yorum yapan kullanıcı ID
   /// [commentText]: Yorum metni
-  /// [rating]: Puan (1-10)
+  /// [rating]: Puan (1-10, opsiyonel)
   /// 
-  /// Returns: Oluşturulan yorum
+  /// Returns: Yorum başarı durumu
   /// 
   /// Örnek:
   /// ```dart
-  /// final comment = await movieRepository.addComment(
+  /// await movieRepository.addComment(
   ///   movieId: 1,
-  ///   userId: 'user-id',
-  ///   commentText: 'Harika bir film!',
+  ///   userId: 'user-123',
+  ///   commentText: 'Müthiş bir film!',
   ///   rating: 9,
   /// );
   /// ```
-  Future<Map<String, dynamic>> addComment({
+  Future<bool> addComment({
     required int movieId,
     required String userId,
     required String commentText,
     int? rating,
   }) async {
     try {
-      final response = await _apiService.post(
+      await _apiService.post(
         _commentsEndpoint,
         data: {
           'movie_id': movieId,
@@ -333,32 +329,25 @@ class MovieRepository {
           'rating': rating,
         },
       );
-
-      return response as Map<String, dynamic>;
+      return true;
     } on DioException catch (e) {
       print('Yorum ekleme hatası: ${e.message}');
-      rethrow;
+      return false;
     }
   }
 
-  /// Yorum beğeni/dislike ekle
+  /// Yoruma beğeni ekle
   /// 
   /// [commentId]: Yorum ID
-  /// [userId]: Kullanıcı ID
-  /// [reactionType]: Reaksiyon türü (like, dislike)
+  /// [userId]: Beğenen kullanıcı ID
   /// 
   /// Örnek:
   /// ```dart
-  /// await movieRepository.addCommentReaction(
-  ///   commentId: 1,
-  ///   userId: 'user-id',
-  ///   reactionType: 'like',
-  /// );
+  /// await movieRepository.likeComment(commentId: 1, userId: 'user-123');
   /// ```
-  Future<void> addCommentReaction({
+  Future<bool> likeComment({
     required int commentId,
     required String userId,
-    required String reactionType,
   }) async {
     try {
       await _apiService.post(
@@ -366,18 +355,101 @@ class MovieRepository {
         data: {
           'comment_id': commentId,
           'user_id': userId,
-          'reaction_type': reactionType,
+          'reaction_type': 'like',
         },
       );
+      return true;
     } on DioException catch (e) {
-      print('Reaksiyon ekleme hatası: ${e.message}');
+      print('Beğeni ekleme hatası: ${e.message}');
+      return false;
+    }
+  }
+
+  /// Film/Dizi ekle (Yönetici işlemi)
+  /// 
+  /// [movie]: Eklenecek film/dizi bilgileri
+  /// 
+  /// Returns: Oluşturulan film/dizi
+  /// 
+  /// Örnek:
+  /// ```dart
+  /// final newMovie = Movie(
+  ///   id: 0,
+  ///   title: 'Yeni Film',
+  ///   contentType: 'cinema',
+  ///   isEncrypted: false,
+  ///   totalComments: 0,
+  ///   averageRating: 0,
+  ///   totalRatings: 0,
+  ///   isActive: true,
+  ///   createdAt: DateTime.now(),
+  ///   updatedAt: DateTime.now(),
+  /// );
+  /// final created = await movieRepository.createMovie(newMovie);
+  /// ```
+  Future<Movie> createMovie(Movie movie) async {
+    try {
+      final response = await _apiService.post(
+        _moviesEndpoint,
+        data: movie.toJson(),
+      );
+
+      return Movie.fromJson(response as Map<String, dynamic>);
+    } on DioException catch (e) {
+      print('Film/Dizi oluşturma hatası: ${e.message}');
       rethrow;
     }
   }
 
-  /// Film Rapor Et
+  /// Film/Dizi güncelle (Yönetici işlemi)
   /// 
-  /// [movieId]: Rapor edilen film ID
+  /// [movieId]: Güncellenecek film/dizi ID
+  /// [updates]: Güncellenecek alanlar
+  /// 
+  /// Örnek:
+  /// ```dart
+  /// await movieRepository.updateMovie(1, {
+  ///   'title': 'Güncellenmiş Başlık',
+  ///   'is_encrypted': true,
+  /// });
+  /// ```
+  Future<void> updateMovie(
+    int movieId,
+    Map<String, dynamic> updates,
+  ) async {
+    try {
+      await _apiService.patch(
+        '$_moviesEndpoint?id=eq.$movieId',
+        data: updates,
+      );
+    } on DioException catch (e) {
+      print('Film/Dizi güncelleme hatası: ${e.message}');
+      rethrow;
+    }
+  }
+
+  /// Film/Dizi sil (Yönetici işlemi)
+  /// 
+  /// [movieId]: Silinecek film/dizi ID
+  /// 
+  /// Örnek:
+  /// ```dart
+  /// await movieRepository.deleteMovie(1);
+  /// ```
+  Future<void> deleteMovie(int movieId) async {
+    try {
+      await _apiService.delete(
+        '$_moviesEndpoint?id=eq.$movieId',
+      );
+    } on DioException catch (e) {
+      print('Film/Dizi silme hatası: ${e.message}');
+      rethrow;
+    }
+  }
+
+  /// Film/Dizi rapor et
+  /// 
+  /// [movieId]: Rapor edilen film/dizi ID
   /// [description]: Sorun açıklaması
   /// [userId]: Raporlayan kullanıcı ID
   /// 
@@ -385,8 +457,8 @@ class MovieRepository {
   /// ```dart
   /// await movieRepository.reportMovie(
   ///   movieId: 1,
-  ///   description: 'Bozuk link',
-  ///   userId: 'user-id',
+  ///   description: 'Link bozuk',
+  ///   userId: 'user-123',
   /// );
   /// ```
   Future<void> reportMovie({
@@ -405,54 +477,7 @@ class MovieRepository {
         },
       );
     } on DioException catch (e) {
-      print('Film rapor etme hatası: ${e.message}');
-      rethrow;
-    }
-  }
-
-  /// Film ekle (Yönetici işlemi)
-  /// 
-  /// [movie]: Eklenecek film
-  /// 
-  /// Returns: Oluşturulan film
-  Future<Movie> createMovie(Movie movie) async {
-    try {
-      final response = await _apiService.post(
-        _moviesEndpoint,
-        data: movie.toJson(),
-      );
-
-      return Movie.fromJson(response as Map<String, dynamic>);
-    } on DioException catch (e) {
-      print('Film oluşturma hatası: ${e.message}');
-      rethrow;
-    }
-  }
-
-  /// Film güncelle (Yönetici işlemi)
-  Future<void> updateMovie(
-    int movieId,
-    Map<String, dynamic> updates,
-  ) async {
-    try {
-      await _apiService.patch(
-        '$_moviesEndpoint?id=eq.$movieId',
-        data: updates,
-      );
-    } on DioException catch (e) {
-      print('Film güncelleme hatası: ${e.message}');
-      rethrow;
-    }
-  }
-
-  /// Film sil (Yönetici işlemi)
-  Future<void> deleteMovie(int movieId) async {
-    try {
-      await _apiService.delete(
-        '$_moviesEndpoint?id=eq.$movieId',
-      );
-    } on DioException catch (e) {
-      print('Film silme hatası: ${e.message}');
+      print('Film/Dizi rapor etme hatası: ${e.message}');
       rethrow;
     }
   }
