@@ -5,50 +5,38 @@ import '../repositories/movie_repository.dart';
 /// Film/Dizi Provider
 /// 
 /// Film ve dizilerle ilgili tüm state yönetimini yapar.
-/// Film listeleme, arama, detay gösterme, yorum yönetimi vb.
+/// Listeleme, filtreleme, detay görüntüleme vb.
 /// 
 /// State Management: Provider kullanılır
 /// 
-/// Özellikleri:
-/// - Film listeleme (sinema, dizi)
-/// - Türe göre filtreleme
-/// - Arama
-/// - Yorum yönetimi
-/// - Dizi sezonları ve bölümleri
-/// - Pagination
+/// Özellikler:
+/// - Film/Dizi listeleme (kategoriye göre)
+/// - Tür filtreleme
+/// - Arama desteği
+/// - Yorum sistemi
+/// - Sezon ve bölüm yönetimi (diziler için)
+/// - Pagination desteği
 
 class MovieProvider extends ChangeNotifier {
   final MovieRepository _movieRepository = MovieRepository();
 
-  /// Tüm filmler
+  /// Tüm filmler/diziler
   List<Movie> _movies = [];
   List<Movie> get movies => _movies;
 
-  /// Arama sonuçları
-  List<Movie> _searchResults = [];
-  List<Movie> get searchResults => _searchResults;
-
-  /// Seçili film
+  /// Seçili film/dizi
   Movie? _selectedMovie;
   Movie? get selectedMovie => _selectedMovie;
 
-  /// Seçili filmin sezonları (dizi için)
+  /// Seçili film/dizinin sezonları (dizi için)
   List<MovieSeason> _seasons = [];
   List<MovieSeason> get seasons => _seasons;
 
-  /// Seçili sezon
-  MovieSeason? _selectedSeason;
-  MovieSeason? get selectedSeason => _selectedSeason;
-
-  /// Seçili sezonun bölümleri
+  /// Seçili sezonun bölümleri (dizi için)
   List<MovieEpisode> _episodes = [];
   List<MovieEpisode> get episodes => _episodes;
 
-  /// Seçili bölüm (dizi için oynatma)
-  MovieEpisode? _selectedEpisode;
-  MovieEpisode? get selectedEpisode => _selectedEpisode;
-
-  /// Film yorumları
+  /// Seçili film/dizinin yorumları
   List<Map<String, dynamic>> _comments = [];
   List<Map<String, dynamic>> get comments => _comments;
 
@@ -56,21 +44,17 @@ class MovieProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _genres = [];
   List<Map<String, dynamic>> get genres => _genres;
 
-  /// Seçili tür
-  Map<String, dynamic>? _selectedGenre;
-  Map<String, dynamic>? get selectedGenre => _selectedGenre;
+  /// Seçili tür ID'leri
+  List<int> _selectedGenreIds = [];
+  List<int> get selectedGenreIds => _selectedGenreIds;
 
   /// İçerik türü (cinema, series)
-  String? _selectedContentType;
-  String? get selectedContentType => _selectedContentType;
+  String _contentType = 'cinema';
+  String get contentType => _contentType;
 
   /// Yükleme durumu
   bool _isLoading = false;
   bool get isLoading => _isLoading;
-
-  /// Arama yükleme durumu
-  bool _isSearching = false;
-  bool get isSearching => _isSearching;
 
   /// Hata mesajı
   String? _error;
@@ -80,147 +64,139 @@ class MovieProvider extends ChangeNotifier {
   int _currentPage = 0;
   int get currentPage => _currentPage;
 
-  MovieProvider() {
-    _initialize();
-  }
+  /// Arama sorgusu
+  String _searchQuery = '';
+  String get searchQuery => _searchQuery;
 
-  /// Provider'ı başlat
-  Future<void> _initialize() async {
-    await _loadGenres();
-  }
+  /// Listeleme görünümü (list, grid)
+  String _viewMode = 'grid';
+  String get viewMode => _viewMode;
 
-  /// Türleri yükle
-  Future<void> _loadGenres() async {
-    try {
-      _genres = await _movieRepository.getAllGenres();
-      notifyListeners();
-    } catch (e) {
-      print('Load genres error: $e');
-    }
-  }
-
-  /// Tüm filmleri yükle
+  /// Tüm filmler/dizileri yükle
   /// 
-  /// [contentType]: İçerik türü filtresi (cinema, series)
-  /// [forceRefresh]: Öncekini yoksay ve yeniden yükle
+  /// [contentType]: 'cinema' (Sinema) veya 'series' (Dizi)
   /// 
   /// Örnek:
   /// ```dart
   /// await movieProvider.loadMovies(contentType: 'cinema');
   /// ```
-  Future<void> loadMovies({
-    String? contentType,
-    bool forceRefresh = false,
-  }) async {
+  Future<void> loadMovies({required String contentType}) async {
+    _contentType = contentType;
+    _currentPage = 0;
     _isLoading = true;
     _error = null;
-    _currentPage = 0;
-    _selectedContentType = contentType;
     notifyListeners();
 
     try {
-      final movies = await _movieRepository.getAllMovies(
+      final movies = await _movieRepository.getMovies(
         contentType: contentType,
+        limit: 10,
+        offset: 0,
       );
       _movies = movies;
       _error = null;
     } catch (e) {
       _error = 'Filmler yüklenirken hata: $e';
-      print('Load movies error: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Türe göre filmleri yükle
+  /// Türlere göre filmler/dizileri yükle
   /// 
-  /// [genreId]: Tür ID
-  /// [contentType]: İçerik türü filtresi (opsiyonel)
+  /// [contentType]: İçerik türü
+  /// [genreIds]: Tür ID'leri
   /// 
   /// Örnek:
   /// ```dart
-  /// await movieProvider.loadMoviesByGenre(1); // Fantastik
+  /// await movieProvider.loadMoviesByGenres(
+  ///   contentType: 'cinema',
+  ///   genreIds: [1, 2], // Fantastik, Bilim Kurgu
+  /// );
   /// ```
-  Future<void> loadMoviesByGenre(
-    int genreId, {
-    String? contentType,
+  Future<void> loadMoviesByGenres({
+    required String contentType,
+    required List<int> genreIds,
   }) async {
+    if (genreIds.isEmpty) {
+      await loadMovies(contentType: contentType);
+      return;
+    }
+
+    _contentType = contentType;
+    _selectedGenreIds = genreIds;
+    _currentPage = 0;
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final movies = await _movieRepository.getMoviesByGenre(
-        genreId,
+      final movies = await _movieRepository.getMoviesByGenres(
         contentType: contentType,
+        genreIds: genreIds,
+        limit: 10,
+        offset: 0,
       );
       _movies = movies;
-      _selectedGenre = _genres.firstWhere(
-        (g) => g['id'] == genreId,
-        orElse: () => {},
-      );
       _error = null;
     } catch (e) {
-      _error = 'Türe göre filmler yüklenirken hata: $e';
-      print('Load by genre error: $e');
+      _error = 'Türlerine göre filmler yüklenirken hata: $e';
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Film arama yap
+  /// Filmler/Dizilerde arama yap
   /// 
   /// [query]: Aranacak kelime
-  /// [contentType]: İçerik türü filtresi (opsiyonel)
-  /// 
-  /// Arama sonuçları [searchResults]'ta tutulur
   /// 
   /// Örnek:
   /// ```dart
   /// await movieProvider.searchMovies('Matrix');
-  /// final results = movieProvider.searchResults;
   /// ```
-  Future<void> searchMovies(
-    String query, {
-    String? contentType,
-  }) async {
-    if (query.isEmpty) {
-      _searchResults = [];
-      notifyListeners();
-      return;
-    }
-
-    _isSearching = true;
+  Future<void> searchMovies(String query) async {
+    _searchQuery = query;
+    _currentPage = 0;
+    _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      _searchResults = await _movieRepository.searchMovies(
-        query,
-        contentType: contentType,
-      );
-      _error = null;
+      if (query.isEmpty) {
+        await loadMovies(contentType: _contentType);
+      } else {
+        final results = await _movieRepository.searchMovies(query);
+        _movies = results;
+        _error = null;
+      }
     } catch (e) {
       _error = 'Arama sırasında hata: $e';
-      _searchResults = [];
-      print('Search error: $e');
     } finally {
-      _isSearching = false;
+      _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Arama sonuçlarını temizle
-  void clearSearch() {
-    _searchResults = [];
-    notifyListeners();
+  /// Türleri yükle
+  /// 
+  /// Örnek:
+  /// ```dart
+  /// await movieProvider.loadGenres();
+  /// ```
+  Future<void> loadGenres() async {
+    try {
+      _genres = await _movieRepository.getGenres();
+      notifyListeners();
+    } catch (e) {
+      print('Türler yüklenirken hata: $e');
+    }
   }
 
-  /// Film seç ve detaylarını yükle
+  /// Film/Dizi seç ve detaylarını yükle
   /// 
-  /// [movie]: Seçilecek film
+  /// [movie]: Seçilecek film/dizi
   /// 
   /// Örnek:
   /// ```dart
@@ -232,25 +208,20 @@ class MovieProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Eğer dizi ise sezonları yükle
+      // Yorumları yükle
+      await loadComments(movie.id);
+
+      // Dizi ise sezonları yükle
       if (movie.isSeries) {
         _seasons = await _movieRepository.getSeasons(movie.id);
         if (_seasons.isNotEmpty) {
-          _selectedSeason = _seasons[0];
-          _episodes = await _movieRepository.getEpisodes(_seasons[0].id);
-          if (_episodes.isNotEmpty) {
-            _selectedEpisode = _episodes[0];
-          }
+          // İlk sezonun bölümlerini yükle
+          await selectSeason(_seasons[0]);
         }
       }
-
-      // Yorumları yükle
-      await _loadComments(movie.id);
-
       _error = null;
     } catch (e) {
-      _error = 'Film seçme hatası: $e';
-      print('Select movie error: $e');
+      _error = 'Film/Dizi yüklenirken hata: $e';
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -266,87 +237,87 @@ class MovieProvider extends ChangeNotifier {
   /// await movieProvider.selectSeason(season);
   /// ```
   Future<void> selectSeason(MovieSeason season) async {
-    _selectedSeason = season;
     _isLoading = true;
     notifyListeners();
 
     try {
       _episodes = await _movieRepository.getEpisodes(season.id);
-      if (_episodes.isNotEmpty) {
-        _selectedEpisode = _episodes[0];
-      }
       _error = null;
     } catch (e) {
-      _error = 'Sezon seçme hatası: $e';
-      print('Select season error: $e');
+      _error = 'Bölümler yüklenirken hata: $e';
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Bölüm seç (Dizi için oynatma)
+  /// Film/Dizinin yorumlarını yükle
   /// 
-  /// [episode]: Seçilecek bölüm
+  /// [movieId]: Film/Dizi ID
+  /// [limit]: Limit
+  /// [offset]: Offset
   /// 
   /// Örnek:
   /// ```dart
-  /// movieProvider.selectEpisode(episode);
+  /// await movieProvider.loadComments(movieId);
   /// ```
-  void selectEpisode(MovieEpisode episode) {
-    _selectedEpisode = episode;
-    notifyListeners();
-  }
-
-  /// Filmin yorumlarını yükle
-  Future<void> _loadComments(int movieId) async {
+  Future<void> loadComments(
+    int movieId, {
+    int limit = 10,
+    int offset = 0,
+  }) async {
     try {
-      _comments = await _movieRepository.getComments(movieId);
+      _comments = await _movieRepository.getComments(
+        movieId,
+        limit: limit,
+        offset: offset,
+      );
       notifyListeners();
     } catch (e) {
-      print('Load comments error: $e');
+      print('Yorumlar yüklenirken hata: $e');
     }
   }
 
-  /// Yorum ekle
+  /// Film/Diziye yorum yap
   /// 
+  /// [movieId]: Film/Dizi ID
   /// [userId]: Yorum yapan kullanıcı ID
   /// [commentText]: Yorum metni
-  /// [rating]: Puan (1-10)
+  /// [rating]: Puan (1-10, opsiyonel)
   /// 
   /// Örnek:
   /// ```dart
   /// await movieProvider.addComment(
-  ///   userId: 'user-id',
+  ///   movieId: 1,
+  ///   userId: 'user-123',
   ///   commentText: 'Harika bir film!',
   ///   rating: 9,
   /// );
   /// ```
   Future<bool> addComment({
+    required int movieId,
     required String userId,
     required String commentText,
     int? rating,
   }) async {
-    if (_selectedMovie == null) return false;
-
     _isLoading = true;
     notifyListeners();
 
     try {
-      await _movieRepository.addComment(
-        movieId: _selectedMovie!.id,
+      final success = await _movieRepository.addComment(
+        movieId: movieId,
         userId: userId,
         commentText: commentText,
         rating: rating,
       );
 
-      // Yorumları yeniden yükle
-      await _loadComments(_selectedMovie!.id);
-      _error = null;
-      return true;
+      if (success) {
+        // Yorumları yeniden yükle
+        await loadComments(movieId);
+      }
+      return success;
     } catch (e) {
-      _error = 'Yorum ekleme hatası: $e';
-      print('Add comment error: $e');
+      _error = 'Yorum yapma hatası: $e';
       return false;
     } finally {
       _isLoading = false;
@@ -354,63 +325,55 @@ class MovieProvider extends ChangeNotifier {
     }
   }
 
-  /// Yorum beğeni/dislike ekle
+  /// Yoruma beğeni ekle
   /// 
   /// [commentId]: Yorum ID
-  /// [userId]: Kullanıcı ID
-  /// [reactionType]: Reaksiyon türü (like, dislike)
+  /// [userId]: Beğenen kullanıcı ID
   /// 
   /// Örnek:
   /// ```dart
-  /// await movieProvider.addCommentReaction(
-  ///   commentId: 1,
-  ///   userId: 'user-id',
-  ///   reactionType: 'like',
-  /// );
+  /// await movieProvider.likeComment(commentId: 1, userId: 'user-123');
   /// ```
-  Future<bool> addCommentReaction({
+  Future<bool> likeComment({
     required int commentId,
     required String userId,
-    required String reactionType,
   }) async {
     try {
-      await _movieRepository.addCommentReaction(
+      return await _movieRepository.likeComment(
         commentId: commentId,
         userId: userId,
-        reactionType: reactionType,
       );
-      return true;
     } catch (e) {
-      _error = 'Reaksiyon ekleme hatası: $e';
-      print('Add reaction error: $e');
+      _error = 'Beğeni ekleme hatası: $e';
       return false;
     }
   }
 
-  /// Film Rapor Et
+  /// Film/Dizi rapor et
   /// 
+  /// [movieId]: Rapor edilen film/dizi ID
   /// [description]: Sorun açıklaması
   /// [userId]: Raporlayan kullanıcı ID
   /// 
   /// Örnek:
   /// ```dart
   /// await movieProvider.reportMovie(
-  ///   description: 'Bozuk link',
-  ///   userId: 'user-id',
+  ///   movieId: 1,
+  ///   description: 'Link bozuk',
+  ///   userId: 'user-123',
   /// );
   /// ```
   Future<bool> reportMovie({
+    required int movieId,
     required String description,
     required String userId,
   }) async {
-    if (_selectedMovie == null) return false;
-
     _isLoading = true;
     notifyListeners();
 
     try {
       await _movieRepository.reportMovie(
-        movieId: _selectedMovie!.id,
+        movieId: movieId,
         description: description,
         userId: userId,
       );
@@ -418,7 +381,6 @@ class MovieProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _error = 'Rapor etme hatası: $e';
-      print('Report error: $e');
       return false;
     } finally {
       _isLoading = false;
@@ -426,7 +388,7 @@ class MovieProvider extends ChangeNotifier {
     }
   }
 
-  /// Daha fazla film yükle (pagination)
+  /// Daha fazla film/dizi yükle (pagination)
   /// 
   /// Örnek:
   /// ```dart
@@ -438,25 +400,59 @@ class MovieProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final moreMovies = await _movieRepository.getAllMovies(
-        contentType: _selectedContentType,
-        limit: 10,
-        offset: _currentPage * 10,
-      );
+      List<Movie> moreMovies;
+      if (_selectedGenreIds.isEmpty) {
+        moreMovies = await _movieRepository.getMovies(
+          contentType: _contentType,
+          limit: 10,
+          offset: _currentPage * 10,
+        );
+      } else {
+        moreMovies = await _movieRepository.getMoviesByGenres(
+          contentType: _contentType,
+          genreIds: _selectedGenreIds,
+          limit: 10,
+          offset: _currentPage * 10,
+        );
+      }
       _movies.addAll(moreMovies);
       _error = null;
     } catch (e) {
       _error = 'Daha fazla film yüklenirken hata: $e';
-      _currentPage--; // Hata durumunda sayfayı geri al
-      print('Load more error: $e');
+      _currentPage--;
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
+  /// Listeleme görünümünü değiştir (list <-> grid)
+  /// 
+  /// Örnek:
+  /// ```dart
+  /// movieProvider.toggleViewMode();
+  /// ```
+  void toggleViewMode() {
+    _viewMode = _viewMode == 'list' ? 'grid' : 'list';
+    notifyListeners();
+  }
+
   /// Hata mesajını temizle
   void clearError() {
+    _error = null;
+    notifyListeners();
+  }
+
+  /// Tüm veriyi sıfırla
+  void reset() {
+    _movies = [];
+    _selectedMovie = null;
+    _seasons = [];
+    _episodes = [];
+    _comments = [];
+    _selectedGenreIds = [];
+    _currentPage = 0;
+    _searchQuery = '';
     _error = null;
     notifyListeners();
   }
