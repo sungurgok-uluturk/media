@@ -1,73 +1,81 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/auth_provider.dart';
+import '../services/supabase_service.dart';
 
 /// Ayarlar Provider
 /// 
 /// Uygulama ayarlarını ve kullanıcı tercihlerini yönetir.
-/// Tema, dil, oynatıcı ayarları vb.
+/// Tema, dil, oynatıcı ayarları, bildirimler vb.
 /// 
 /// State Management: Provider kullanılır
 /// 
-/// Özellikler:
-/// - Tema yönetimi (açık/koyu)
-/// - Uygulama ayarları
-/// - TV Player ayarları
-/// - Radyo Player ayarları
-/// - Kullanıcı profili düzenleme
+/// Saklama:
+/// - SharedPreferences: Uygulama ayarları
+/// - SQLite: Komplex veriler (gelecekte)
+/// - Supabase: Bulut senkronizasyonu (opsiyonel)
 
 class SettingsProvider extends ChangeNotifier {
-  /// Tema (light, dark, custom)
-  String _theme = 'dark';
+  // Tema Ayarları
+  String _theme = 'light'; // light, dark, system
   String get theme => _theme;
 
-  /// TV Player başlangıç modu (fullscreen, mini)
-  String _tvPlayerStartMode = 'fullscreen';
-  String get tvPlayerStartMode => _tvPlayerStartMode;
+  // Dil Ayarları
+  String _language = 'tr'; // tr, en
+  String get language => _language;
 
-  /// TV kanal listesi konumu (left, right, bottom, top)
-  String _tvChannelListPosition = 'right';
-  String get tvChannelListPosition => _tvChannelListPosition;
-
-  /// TV kanal listesi transparanlığı (transparent, opaque)
-  String _tvChannelListTransparency = 'opaque';
-  String get tvChannelListTransparency => _tvChannelListTransparency;
-
-  /// Başlangıç sekmesi (tv, radio, movie, chat, settings)
-  String _startTab = 'tv';
-  String get startTab => _startTab;
-
-  /// Bildirimleri etkinleştir/devre dışı bırak
+  // Bildirim Ayarları
   bool _notificationsEnabled = true;
   bool get notificationsEnabled => _notificationsEnabled;
 
-  /// Radyo arka planda çalmaya devam etsin mi
-  bool _radioBackgroundPlayback = true;
-  bool get radioBackgroundPlayback => _radioBackgroundPlayback;
+  // TV Player Ayarları
+  bool _tvPlayerFullscreen = true; // Tam ekran mı başlasın?
+  bool get tvPlayerFullscreen => _tvPlayerFullscreen;
 
-  /// Video kalitesi otomatik seçilsin mi
-  bool _autoSelectQuality = true;
-  bool get autoSelectQuality => _autoSelectQuality;
+  String _tvChannelListPosition = 'right'; // left, right, top, bottom
+  String get tvChannelListPosition => _tvChannelListPosition;
 
-  /// Hata mesajı
+  String _tvChannelListOpacity = 'transparent'; // transparent, opaque
+  String get tvChannelListOpacity => _tvChannelListOpacity;
+
+  // Radyo Player Ayarları
+  bool _radioPlayerMinimize = true; // Minimize edilebilir mi?
+  bool get radioPlayerMinimize => _radioPlayerMinimize;
+
+  // Film Listeleme Ayarları
+  String _movieViewMode = 'grid'; // list, grid
+  String get movieViewMode => _movieViewMode;
+
+  int _moviesPerPage = 10; // Sayfa başına film sayısı
+  int get moviesPerPage => _moviesPerPage;
+
+  // Ana Sekme Ayarı
+  String _defaultTab = 'tv'; // tv, radio, movies, chat, settings
+  String get defaultTab => _defaultTab;
+
+  // Bağlantı Ayarları
+  bool _wifiOnly = false; // Sadece WiFi üzerinden içerik yükle mi?
+  bool get wifiOnly => _wifiOnly;
+
+  bool _mobileDataWarning = true; // Mobil veri uyarısı göster mi?
+  bool get mobileDataWarning => _mobileDataWarning;
+
+  // Oynatıcı Ayarları
+  bool _autoPlayNextEpisode = true; // Sonraki bölümü otomatik oynat?
+  bool get autoPlayNextEpisode => _autoPlayNextEpisode;
+
+  bool _rememberWatchPosition = true; // İzleme konumunu hatırla?
+  bool get rememberWatchPosition => _rememberWatchPosition;
+
+  // Hata mesajı
   String? _error;
   String? get error => _error;
 
-  /// Ayarları yükle (SharedPreferences veya lokal veritabanından)
-  Future<void> loadSettings() async {
-    try {
-      // TODO: SharedPreferences'ten veya local DB'den yükle
-      _error = null;
-      notifyListeners();
-    } catch (e) {
-      _error = 'Ayarlar yüklenirken hata: $e';
-      print('Load settings error: $e');
-    }
-  }
+  // Yükleme durumu
+  bool _isLoading = false;
+  bool get isLoading => _isLoading;
 
   /// Tema değiştir
   /// 
-  /// [newTheme]: Yeni tema (light, dark, custom)
+  /// [newTheme]: Yeni tema (light, dark, system)
   /// 
   /// Örnek:
   /// ```dart
@@ -75,104 +83,43 @@ class SettingsProvider extends ChangeNotifier {
   /// ```
   Future<void> setTheme(String newTheme) async {
     _theme = newTheme;
+    _error = null;
     notifyListeners();
 
     try {
-      // TODO: SharedPreferences'e kaydet
-      _error = null;
+      // SharedPreferences'a kaydet
+      // await _preferences.setString('theme', newTheme);
     } catch (e) {
       _error = 'Tema kaydedilirken hata: $e';
-      print('Set theme error: $e');
+      notifyListeners();
     }
   }
 
-  /// TV Player başlangıç modunu değiştir
+  /// Dil değiştir
   /// 
-  /// [mode]: fullscreen veya mini
+  /// [newLanguage]: Yeni dil (tr, en)
   /// 
   /// Örnek:
   /// ```dart
-  /// await settingsProvider.setTvPlayerStartMode('fullscreen');
+  /// await settingsProvider.setLanguage('en');
   /// ```
-  Future<void> setTvPlayerStartMode(String mode) async {
-    _tvPlayerStartMode = mode;
+  Future<void> setLanguage(String newLanguage) async {
+    _language = newLanguage;
+    _error = null;
     notifyListeners();
 
     try {
-      // TODO: SharedPreferences'e kaydet
-      _error = null;
+      // SharedPreferences'a kaydet
+      // await _preferences.setString('language', newLanguage);
     } catch (e) {
-      _error = 'TV Player ayarı kaydedilirken hata: $e';
-      print('Set TV player mode error: $e');
+      _error = 'Dil kaydedilirken hata: $e';
+      notifyListeners();
     }
   }
 
-  /// TV kanal listesi konumunu değiştir
+  /// Bildirimleri aç/kapat
   /// 
-  /// [position]: left, right, bottom, top
-  /// 
-  /// Örnek:
-  /// ```dart
-  /// await settingsProvider.setTvChannelListPosition('left');
-  /// ```
-  Future<void> setTvChannelListPosition(String position) async {
-    _tvChannelListPosition = position;
-    notifyListeners();
-
-    try {
-      // TODO: SharedPreferences'e kaydet
-      _error = null;
-    } catch (e) {
-      _error = 'Kanal listesi konumu kaydedilirken hata: $e';
-      print('Set channel list position error: $e');
-    }
-  }
-
-  /// TV kanal listesi şeffaflığını değiştir
-  /// 
-  /// [transparency]: transparent veya opaque
-  /// 
-  /// Örnek:
-  /// ```dart
-  /// await settingsProvider.setTvChannelListTransparency('transparent');
-  /// ```
-  Future<void> setTvChannelListTransparency(String transparency) async {
-    _tvChannelListTransparency = transparency;
-    notifyListeners();
-
-    try {
-      // TODO: SharedPreferences'e kaydet
-      _error = null;
-    } catch (e) {
-      _error = 'Şeffaflık kaydedilirken hata: $e';
-      print('Set transparency error: $e');
-    }
-  }
-
-  /// Başlangıç sekmesini değiştir
-  /// 
-  /// [tabName]: tv, radio, movie, chat, settings
-  /// 
-  /// Örnek:
-  /// ```dart
-  /// await settingsProvider.setStartTab('movie');
-  /// ```
-  Future<void> setStartTab(String tabName) async {
-    _startTab = tabName;
-    notifyListeners();
-
-    try {
-      // TODO: SharedPreferences'e kaydet
-      _error = null;
-    } catch (e) {
-      _error = 'Başlangıç sekmesi kaydedilirken hata: $e';
-      print('Set start tab error: $e');
-    }
-  }
-
-  /// Bildirimleri etkinleştir/devre dışı bırak
-  /// 
-  /// [enabled]: Etkinleştirilsin mi?
+  /// [enabled]: Açık mı?
   /// 
   /// Örnek:
   /// ```dart
@@ -180,56 +127,201 @@ class SettingsProvider extends ChangeNotifier {
   /// ```
   Future<void> setNotifications(bool enabled) async {
     _notificationsEnabled = enabled;
+    _error = null;
     notifyListeners();
 
     try {
-      // TODO: SharedPreferences'e kaydet
-      _error = null;
+      // SharedPreferences'a kaydet
+      // await _preferences.setBool('notifications_enabled', enabled);
     } catch (e) {
-      _error = 'Bildirim ayarı kaydedilirken hata: $e';
-      print('Set notifications error: $e');
+      _error = 'Bildirimler kaydedilirken hata: $e';
+      notifyListeners();
     }
   }
 
-  /// Radyo arka plan oynatmasını etkinleştir/devre dışı bırak
+  /// TV Player ayarlarını güncelle
   /// 
-  /// [enabled]: Etkinleştirilsin mi?
+  /// [fullscreen]: Tam ekranda başlasın mı?
+  /// [channelListPosition]: Kanal listesi konumu
+  /// [opacity]: Kanal listesi şeffaflığı
   /// 
   /// Örnek:
   /// ```dart
-  /// await settingsProvider.setRadioBackgroundPlayback(true);
+  /// await settingsProvider.setTvPlayerSettings(
+  ///   fullscreen: false,
+  ///   channelListPosition: 'left',
+  /// );
   /// ```
-  Future<void> setRadioBackgroundPlayback(bool enabled) async {
-    _radioBackgroundPlayback = enabled;
+  Future<void> setTvPlayerSettings({
+    bool? fullscreen,
+    String? channelListPosition,
+    String? opacity,
+  }) async {
+    if (fullscreen != null) _tvPlayerFullscreen = fullscreen;
+    if (channelListPosition != null) _tvChannelListPosition = channelListPosition;
+    if (opacity != null) _tvChannelListOpacity = opacity;
+
+    _error = null;
     notifyListeners();
 
     try {
-      // TODO: SharedPreferences'e kaydet
-      _error = null;
+      // SharedPreferences'a kaydet
+      // await _preferences.setBool('tv_fullscreen', _tvPlayerFullscreen);
+      // await _preferences.setString('tv_list_position', _tvChannelListPosition);
     } catch (e) {
-      _error = 'Arka plan oynatma ayarı kaydedilirken hata: $e';
-      print('Set background playback error: $e');
+      _error = 'TV Player ayarları kaydedilirken hata: $e';
+      notifyListeners();
     }
   }
 
-  /// Video kalitesi otomatik seçilsin mi
+  /// Film listeleme ayarlarını güncelle
   /// 
-  /// [enabled]: Otomatik seçilsin mi?
+  /// [viewMode]: Görüntü modu (list, grid)
+  /// [perPage]: Sayfa başına film sayısı
   /// 
   /// Örnek:
   /// ```dart
-  /// await settingsProvider.setAutoSelectQuality(false);
+  /// await settingsProvider.setMovieSettings(
+  ///   viewMode: 'list',
+  ///   perPage: 20,
+  /// );
   /// ```
-  Future<void> setAutoSelectQuality(bool enabled) async {
-    _autoSelectQuality = enabled;
+  Future<void> setMovieSettings({
+    String? viewMode,
+    int? perPage,
+  }) async {
+    if (viewMode != null) _movieViewMode = viewMode;
+    if (perPage != null) _moviesPerPage = perPage;
+
+    _error = null;
     notifyListeners();
 
     try {
-      // TODO: SharedPreferences'e kaydet
-      _error = null;
+      // SharedPreferences'a kaydet
+      // await _preferences.setString('movie_view_mode', _movieViewMode);
+      // await _preferences.setInt('movies_per_page', _moviesPerPage);
     } catch (e) {
-      _error = 'Kalite ayarı kaydedilirken hata: $e';
-      print('Set auto quality error: $e');
+      _error = 'Film ayarları kaydedilirken hata: $e';
+      notifyListeners();
+    }
+  }
+
+  /// Varsayılan sekmeyi ayarla
+  /// 
+  /// [tab]: Sekme adı (tv, radio, movies, chat, settings)
+  /// 
+  /// Örnek:
+  /// ```dart
+  /// await settingsProvider.setDefaultTab('movies');
+  /// ```
+  Future<void> setDefaultTab(String tab) async {
+    _defaultTab = tab;
+    _error = null;
+    notifyListeners();
+
+    try {
+      // SharedPreferences'a kaydet
+      // await _preferences.setString('default_tab', tab);
+    } catch (e) {
+      _error = 'Varsayılan sekme kaydedilirken hata: $e';
+      notifyListeners();
+    }
+  }
+
+  /// Bağlantı ayarlarını güncelle
+  /// 
+  /// [wifiOnly]: Sadece WiFi mi?
+  /// [mobileWarning]: Mobil veri uyarısı göster mi?
+  /// 
+  /// Örnek:
+  /// ```dart
+  /// await settingsProvider.setConnectionSettings(
+  ///   wifiOnly: true,
+  ///   mobileWarning: false,
+  /// );
+  /// ```
+  Future<void> setConnectionSettings({
+    bool? wifiOnly,
+    bool? mobileWarning,
+  }) async {
+    if (wifiOnly != null) _wifiOnly = wifiOnly;
+    if (mobileWarning != null) _mobileDataWarning = mobileWarning;
+
+    _error = null;
+    notifyListeners();
+
+    try {
+      // SharedPreferences'a kaydet
+      // await _preferences.setBool('wifi_only', _wifiOnly);
+      // await _preferences.setBool('mobile_warning', _mobileDataWarning);
+    } catch (e) {
+      _error = 'Bağlantı ayarları kaydedilirken hata: $e';
+      notifyListeners();
+    }
+  }
+
+  /// Oynatıcı ayarlarını güncelle
+  /// 
+  /// [autoPlayNextEpisode]: Sonraki bölümü otomatik oynat?
+  /// [rememberPosition]: İzleme konumunu hatırla?
+  /// 
+  /// Örnek:
+  /// ```dart
+  /// await settingsProvider.setPlayerSettings(
+  ///   autoPlayNextEpisode: false,
+  ///   rememberPosition: true,
+  /// );
+  /// ```
+  Future<void> setPlayerSettings({
+    bool? autoPlayNextEpisode,
+    bool? rememberPosition,
+  }) async {
+    if (autoPlayNextEpisode != null) _autoPlayNextEpisode = autoPlayNextEpisode;
+    if (rememberPosition != null) _rememberWatchPosition = rememberPosition;
+
+    _error = null;
+    notifyListeners();
+
+    try {
+      // SharedPreferences'a kaydet
+      // await _preferences.setBool('auto_play_next', _autoPlayNextEpisode);
+      // await _preferences.setBool('remember_position', _rememberWatchPosition);
+    } catch (e) {
+      _error = 'Oynatıcı ayarları kaydedilirken hata: $e';
+      notifyListeners();
+    }
+  }
+
+  /// Tüm ayarları sıfırla
+  /// 
+  /// Örnek:
+  /// ```dart
+  /// await settingsProvider.resetAllSettings();
+  /// ```
+  Future<void> resetAllSettings() async {
+    _theme = 'light';
+    _language = 'tr';
+    _notificationsEnabled = true;
+    _tvPlayerFullscreen = true;
+    _tvChannelListPosition = 'right';
+    _tvChannelListOpacity = 'transparent';
+    _radioPlayerMinimize = true;
+    _movieViewMode = 'grid';
+    _moviesPerPage = 10;
+    _defaultTab = 'tv';
+    _wifiOnly = false;
+    _mobileDataWarning = true;
+    _autoPlayNextEpisode = true;
+    _rememberWatchPosition = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      // SharedPreferences'ı temizle
+      // await _preferences.clear();
+    } catch (e) {
+      _error = 'Ayarlar sıfırlanırken hata: $e';
+      notifyListeners();
     }
   }
 
